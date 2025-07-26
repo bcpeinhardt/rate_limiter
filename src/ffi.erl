@@ -1,6 +1,6 @@
 -module(ffi).
 
--export([get_ms/0]).
+-export([get_micro_second/0]).
 
-get_ms() ->
-    erlang:monotonic_time(millisecond).
+get_micro_second() ->
+    erlang:monotonic_time(microsecond).
