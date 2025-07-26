@@ -8,7 +8,6 @@ import rate_limiter/limit
 
 pub type RateLimitError {
   CouldNotStartRateLimiter(inner: actor.StartError)
-  EncounteredRateLimit(limit_description: String)
 }
 
 pub opaque type RateLimiter {

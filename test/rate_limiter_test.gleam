@@ -18,7 +18,7 @@ fn limited_counter(limiter: rate_limiter.RateLimiter) -> Int {
 pub fn basic_usage_test() {
   // Set up the rate limiter
   let assert Ok(limiter) =
-    rate_limiter.new([limit.per_second(hits: 10), limit.per_minute(15)])
+    rate_limiter.new([limit.per_second(hits: 10), limit.per_minute(hits: 15)])
 
   // Call limited counter 30 times in a row, and verify
   // the sum of successful counts is 10
