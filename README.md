@@ -17,11 +17,11 @@ pub fn main() {
   wisp.configure_logger()
   let secret_key_base = wisp.random_string(64)
 
-  // Set up our rate limiter actor
+  // Set up our rate limiter
   let assert Ok(limiter) =
     rate_limiter.new_rate_limiter([
-      rate_limiter.per_hour(100),
-      rate_limiter.per_minute(60),
+      limit.per_hour(100),
+      limit.per_minute(60),
     ])
 
   // Start the Mist web server.
@@ -38,11 +38,15 @@ pub fn main() {
 // function to handle it. Here's a wisp request handler as an example
 fn handle_request(req: wisp.Request, ctx: Context) -> wisp.Response {
   use _req <- middleware(req)
+
+  // Handle a rate limit event.
   use <- rate_limiter.lazy_guard(ctx.limiter, fn(limit_description) {
     let msg = "rate limit hit for request handler: " <> limit_description
     wisp.log_info(msg)
     wisp.response(429) |> wisp.string_body(msg)
   })
+
+  // Continue with the function if a limit wasn't hit.
   wisp.ok() |> wisp.string_body("Hello, Joe!")
 }
 ```
