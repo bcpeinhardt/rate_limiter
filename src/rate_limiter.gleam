@@ -39,3 +39,9 @@ pub fn lazy_guard(
 ) -> a {
   rate_limiter_actor.lazy_guard(rate_limiter.inner, timeout_ms, or_else, do)
 }
+
+/// Ask the rate limiter how much time is left before you can make n requests.
+/// The response is in *microseconds*.
+pub fn ask(rate_limiter: RateLimiter, timeout_ms: Int, n_requests: Int) -> Int {
+  rate_limiter_actor.ask(rate_limiter.inner, timeout_ms, n_requests)
+}

@@ -37,11 +37,18 @@ fn replenish_tokens(
 }
 
 pub opaque type Msg {
+
+  // Try to perform a request *immediately*.
   Hit(
     // Responds with either `Ok` or an `Error` containing a description of the limit that
     // was violated.
     reply_with: process.Subject(Result(Nil, String)),
   )
+
+  // Ask how long until n requests can be made.
+  // Get back a resposne in micro seconds. If the number is zero,
+  // it means a request can be made now.
+  Ask(reply_with: process.Subject(Int), n_requests: Int)
 }
 
 pub opaque type State {
@@ -61,17 +68,31 @@ fn add_limits(state: State, limits: List(limit.Limit)) -> State {
   State(..state, limits: list.append(state.limits, limits))
 }
 
+fn refill_tokens(state: State) -> State {
+  State(
+    ..state,
+    limits: list.map(state.limits, replenish_tokens(
+      _,
+      state.last_hit_micro_seconds,
+    )),
+  )
+}
+
+// Try to consume a token for a given limit.
+fn try_consume_token(limit: limit.Limit) -> Result(limit.Limit, Nil) {
+  case limit.tokens > 0 {
+    // No tokens available to consume
+    False -> Error(Nil)
+
+    // There was a token available
+    True -> Ok(limit.Limit(..limit, tokens: limit.tokens - 1))
+  }
+}
+
 fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
   // Before handling any messages, we should use the last recorded hit 
   // time to refill the tokens for each limit
-  let state =
-    State(
-      ..state,
-      limits: list.map(state.limits, replenish_tokens(
-        _,
-        state.last_hit_micro_seconds,
-      )),
-    )
+  let state = refill_tokens(state)
 
   case msg {
     Hit(reply_with:) -> {
@@ -80,15 +101,14 @@ fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
       // to reflect the fact we made a request (i.e. spent a token)
       let res =
         list.try_fold(state.limits, [], fn(updated_limits, limit) {
-          case limit.tokens {
-            // No more tokens, so we can't make a request.
-            // An invalid limit configuration will also trigger this limit case, so it
-            // should be discovered quickly.
-            0 -> Error(limit)
+          case try_consume_token(limit) {
+            // Could not consume a token, return an error with the limit
+            // that caused the failure.
+            Error(Nil) -> Error(limit)
 
-            // There was a token available to spend, so keep going
-            // and update the limit to reflect spending the token.
-            x -> Ok([limit.Limit(..limit, tokens: x - 1), ..updated_limits])
+            // Successfully consumed the token, add the updated limit to the 
+            // list of limits
+            Ok(limit) -> Ok([limit, ..updated_limits])
           }
         })
 
@@ -105,6 +125,39 @@ fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
           actor.continue(State(..state, limits:))
         }
       }
+    }
+    Ask(reply_with:, n_requests:) -> {
+      // Caluclate the max limit until a request can be made
+      let wait =
+        list.fold(state.limits, 0, fn(wait_remaining, limit) {
+          let cost_of_limit = {
+            // A certain number of requests can be made right away by spending existing tokens
+            let not_free_requests = n_requests - limit.tokens
+
+            // Each remaining request constitutes a full request, *except* the one for which we're already
+            // partially through the waiting period.
+            let partial_waiting_period =
+              get_micro_second() - state.last_hit_micro_seconds
+
+            case not_free_requests {
+              // We have enough tokens to cover all the requests we want to make.
+              0 -> 0
+
+              // We're just missing one token, so we just return the partial limit
+              1 -> partial_waiting_period
+
+              // We're missing more than one token, so we need to wait the partial waiting period
+              // *plus* the full waiting period for the rest of the tokens
+              _ ->
+                partial_waiting_period
+                + { limit.micro_seconds_per_token * { not_free_requests - 1 } }
+            }
+          }
+
+          int.max(wait_remaining, cost_of_limit)
+        })
+      process.send(reply_with, wait)
+      actor.continue(state)
     }
   }
 }
@@ -148,4 +201,14 @@ pub fn lazy_guard(
     // The rate limiter says it's okay to make a request right now
     Ok(Nil) -> do()
   }
+}
+
+/// Ask the rate limiter how much time is left before you can make n requests.
+/// The response is in *microseconds*.
+pub fn ask(
+  rate_limiter: actor.Started(process.Subject(Msg)),
+  timeout_ms: Int,
+  n_requests: Int,
+) -> Int {
+  process.call(rate_limiter.data, timeout_ms, Ask(_, n_requests:))
 }

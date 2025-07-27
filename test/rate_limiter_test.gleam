@@ -1,4 +1,5 @@
 import gleam/erlang/process
+import gleam/int
 import gleam/list
 import gleam/string
 import gleeunit
@@ -35,6 +36,12 @@ pub fn basic_usage_test() {
     list.range(1, 30)
     |> list.fold(0, fn(acc, _) { acc + limited_counter(limiter) })
   assert sum2 == 5
+}
+
+pub fn a_rate_limit_with_an_invalid_configuration_immediately_fails_test() {
+  let assert Ok(limiter) = rate_limiter.new([limit.per_second(hits: -10)])
+
+  assert limited_counter(limiter) == 0
 }
 
 pub fn each_limit_constructor_test() {
@@ -87,14 +94,48 @@ pub fn each_limit_constructor_test() {
   assert l.micro_seconds_per_token == 118_032_787
 
   // A negative should produce a no-op
+
   let l = limit.per_minute(hits: -8)
   assert l.max_tokens == 0
   assert l.tokens == 0
   assert l.micro_seconds_per_token == 0
   assert l.description |> string.contains("invalid")
+
   let l = limit.per_minutes(hits: 8, minutes: -8)
   assert l.max_tokens == 0
   assert l.tokens == 0
   assert l.micro_seconds_per_token == 0
   assert l.description |> string.contains("invalid")
+}
+
+pub fn ask_rate_limiter_test() {
+  let assert Ok(limiter) =
+    rate_limiter.new([limit.per_minute(60), limit.per_hour(100)])
+
+  // No requests yet, should be able to make a request right away
+  assert rate_limiter.ask(limiter, 1000, 1) == 0
+
+  // Make 65 requests. The amount of time remaining until I can make a request should be:
+  // 1. non-zero
+  // 2. definitely less than or equal to 1 second (the token replenish rate for 60 requests / minute)
+  list.range(1, 65) |> list.each(fn(_) { limited_counter(limiter) })
+  let wait = rate_limiter.ask(limiter, 1000, 1)
+  assert wait > 0
+  assert wait <= 1_000_000
+  // microseconds in one second
+
+  // Wait a second so our smaller rate limit replenishes
+  process.sleep(1000)
+
+  // Make 40 more requests (total 105)
+  // The amount of time remaining until I can make *2* requests should be:
+  // 1. non-zero
+  // 2. definitely less than 72 seconds, the replenish cost for two tokens at 100 / hour
+  // 3. almost certainly more than 36 seconds, the replenish cost for one token at 100 / hour
+  list.range(1, 40) |> list.each(fn(_) { limited_counter(limiter) })
+  let wait = rate_limiter.ask(limiter, 1000, 2)
+  assert wait > 0
+  assert wait > 36_000_000
+  // microseconds in 36 seconds
+  assert wait < 72_000_000
 }
