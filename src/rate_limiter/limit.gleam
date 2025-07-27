@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/int
 
 const one_second_micro_sec = 1_000_000
@@ -23,6 +24,16 @@ fn hits_per_microseconds(
   microseconds microseconds: Int,
   description description: String,
 ) -> Limit {
+  use <- bool.guard(
+    hits <= 0 || microseconds <= 0,
+    Limit(
+      tokens: 0,
+      max_tokens: 0,
+      micro_seconds_per_token: 0,
+      description: "invalid limit configuration",
+    ),
+  )
+
   // This will be our base unit for how quickly we replenish tokens.
   // Micro seconds is a small enough unit for the tasks this library is intended
   // for that it's okay to truncate the partial microseconds, but to guarantee we aren't

@@ -1,5 +1,6 @@
 import gleam/erlang/process
 import gleam/list
+import gleam/string
 import gleeunit
 import rate_limiter
 import rate_limiter/limit
@@ -10,7 +11,7 @@ pub fn main() -> Nil {
 
 // This counter will only return a 1 to add if the rate limiter lets it pass
 fn limited_counter(limiter: rate_limiter.RateLimiter) -> Int {
-  use <- rate_limiter.lazy_guard(limiter, fn(_) { 0 })
+  use <- rate_limiter.lazy_guard(limiter, 1000, fn(_) { 0 })
   1
 }
 
@@ -34,4 +35,66 @@ pub fn basic_usage_test() {
     list.range(1, 30)
     |> list.fold(0, fn(acc, _) { acc + limited_counter(limiter) })
   assert sum2 == 5
+}
+
+pub fn each_limit_constructor_test() {
+  // 10 hits per second.
+  // 1 second is 1_000_000 micro seconds
+  // That makes 100_000 micros seconds per token w/ a max of 10 tokens.
+  let l = limit.per_second(10)
+  assert l.max_tokens == 10
+  assert l.tokens == 10
+  assert l.micro_seconds_per_token == 100_000
+
+  // 10 hits per every 2 seconds.
+  // 2 seconds is 2_000_000 micro seconds
+  // That makes 200_000 micros seconds per token w/ a max of 10 tokens.
+  let l = limit.per_seconds(hits: 10, seconds: 2)
+  assert l.max_tokens == 10
+  assert l.tokens == 10
+  assert l.micro_seconds_per_token == 200_000
+
+  // 10 hits per minute.
+  // 1 minute is 60_000_000 micro seconds
+  // That makes 6_000_000 micros seconds per token w/ a max of 10 tokens.
+  let l = limit.per_minute(10)
+  assert l.max_tokens == 10
+  assert l.tokens == 10
+  assert l.micro_seconds_per_token == 6_000_000
+
+  // 10 hits per 5 minutes.
+  // 5 minutes is 300_000_000 micro seconds
+  // That makes 30_000_000 micro seconds per token w/ a max of 10 tokens.
+  let l = limit.per_minutes(hits: 10, minutes: 5)
+  assert l.max_tokens == 10
+  assert l.tokens == 10
+  assert l.micro_seconds_per_token == 30_000_000
+
+  // 61 hits per hour.
+  // 1 hour is 3.6 billion micro seconds
+  // 59016393.4426 microseconds per hit, we should round up to 59_016_394 to keep our limit guarantee.
+  let l = limit.per_hour(hits: 61)
+  assert l.max_tokens == 61
+  assert l.tokens == 61
+  assert l.micro_seconds_per_token == 59_016_394
+
+  // 61 hits per 2 hours.
+  // 2 hours is 7.2 billion micro seconds
+  // 118032786.885 microseconds per hit, we should round up to 118_032_787 to keep our limit guarantee.
+  let l = limit.per_hours(hits: 61, hours: 2)
+  assert l.max_tokens == 61
+  assert l.tokens == 61
+  assert l.micro_seconds_per_token == 118_032_787
+
+  // A negative should produce a no-op
+  let l = limit.per_minute(hits: -8)
+  assert l.max_tokens == 0
+  assert l.tokens == 0
+  assert l.micro_seconds_per_token == 0
+  assert l.description |> string.contains("invalid")
+  let l = limit.per_minutes(hits: 8, minutes: -8)
+  assert l.max_tokens == 0
+  assert l.tokens == 0
+  assert l.micro_seconds_per_token == 0
+  assert l.description |> string.contains("invalid")
 }

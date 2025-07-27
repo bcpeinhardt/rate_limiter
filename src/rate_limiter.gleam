@@ -33,8 +33,9 @@ pub fn new(limits: List(limit.Limit)) -> Result(RateLimiter, RateLimitError) {
 /// ```
 pub fn lazy_guard(
   rate_limiter: RateLimiter,
+  timeout_ms: Int,
   or_else: fn(String) -> a,
   do: fn() -> a,
 ) -> a {
-  rate_limiter_actor.lazy_guard(rate_limiter.inner, or_else, do)
+  rate_limiter_actor.lazy_guard(rate_limiter.inner, timeout_ms, or_else, do)
 }

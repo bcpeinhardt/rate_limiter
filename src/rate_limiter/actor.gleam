@@ -81,7 +81,9 @@ fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
       let res =
         list.try_fold(state.limits, [], fn(updated_limits, limit) {
           case limit.tokens {
-            // No more tokens, so we can't make a request
+            // No more tokens, so we can't make a request.
+            // An invalid limit configuration will also trigger this limit case, so it
+            // should be discovered quickly.
             0 -> Error(limit)
 
             // There was a token available to spend, so keep going
@@ -135,10 +137,11 @@ pub fn supervised(
 /// ```
 pub fn lazy_guard(
   rate_limiter: actor.Started(process.Subject(Msg)),
+  timeout_ms: Int,
   or_else: fn(String) -> a,
   do: fn() -> a,
 ) -> a {
-  case process.call(rate_limiter.data, 1000, Hit) {
+  case process.call(rate_limiter.data, timeout_ms, Hit) {
     // The rate limiter says we can't make a request right now.
     Error(desc) -> or_else(desc)
 
