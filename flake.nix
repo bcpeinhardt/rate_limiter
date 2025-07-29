@@ -19,9 +19,6 @@
             pkgs.erlang
             pkgs.rebar3
           ];
-          shellHook = ''
-            echo "rate_limiter develop shell entered."
-          '';
         };
       });
 }
