@@ -18,6 +18,7 @@
             pkgs.gleam
             pkgs.erlang
             pkgs.rebar3
+            pkgs.vscode-extensions.gleam.gleam
           ];
         };
       });
