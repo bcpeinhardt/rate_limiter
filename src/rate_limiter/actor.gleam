@@ -90,7 +90,7 @@ fn try_consume_token(limit: limit.Limit) -> Result(limit.Limit, Nil) {
 }
 
 fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
-  // Before handling any messages, we should use the last recorded hit 
+  // Before handling any messages, we should use the last recorded hit
   // time to refill the tokens for each limit
   let state = refill_tokens(state)
 
@@ -106,7 +106,7 @@ fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
             // that caused the failure.
             Error(Nil) -> Error(limit)
 
-            // Successfully consumed the token, add the updated limit to the 
+            // Successfully consumed the token, add the updated limit to the
             // list of limits
             Ok(limit) -> Ok([limit, ..updated_limits])
           }

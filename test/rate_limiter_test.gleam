@@ -1,5 +1,4 @@
 import gleam/erlang/process
-import gleam/int
 import gleam/list
 import gleam/string
 import gleeunit
@@ -29,7 +28,7 @@ pub fn basic_usage_test() {
     |> list.fold(0, fn(acc, _) { acc + limited_counter(limiter) })
   assert sum == 10
 
-  // Wait 2 seconds, then call the rate limiter 30 times again. We should only get 
+  // Wait 2 seconds, then call the rate limiter 30 times again. We should only get
   // 5 more hits because of the 15 hits / minute limit
   process.sleep(1000 * 2)
   let sum2 =
