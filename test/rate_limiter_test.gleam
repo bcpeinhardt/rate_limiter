@@ -48,62 +48,62 @@ pub fn each_limit_constructor_test() {
   // 1 second is 1_000_000 micro seconds
   // That makes 100_000 micros seconds per token w/ a max of 10 tokens.
   let l = limit.per_second(10)
-  assert l.max_tokens == 10
+  assert l.burst == 10
   assert l.tokens == 10
-  assert l.micro_seconds_per_token == 100_000
+  assert l.ns_per_token == 100_000_000
 
   // 10 hits per every 2 seconds.
   // 2 seconds is 2_000_000 micro seconds
   // That makes 200_000 micros seconds per token w/ a max of 10 tokens.
   let l = limit.per_seconds(hits: 10, seconds: 2)
-  assert l.max_tokens == 10
+  assert l.burst == 10
   assert l.tokens == 10
-  assert l.micro_seconds_per_token == 200_000
+  assert l.ns_per_token == 200_000_000
 
   // 10 hits per minute.
   // 1 minute is 60_000_000 micro seconds
   // That makes 6_000_000 micros seconds per token w/ a max of 10 tokens.
   let l = limit.per_minute(10)
-  assert l.max_tokens == 10
+  assert l.burst == 10
   assert l.tokens == 10
-  assert l.micro_seconds_per_token == 6_000_000
+  assert l.ns_per_token == 6_000_000_000
 
   // 10 hits per 5 minutes.
   // 5 minutes is 300_000_000 micro seconds
   // That makes 30_000_000 micro seconds per token w/ a max of 10 tokens.
   let l = limit.per_minutes(hits: 10, minutes: 5)
-  assert l.max_tokens == 10
+  assert l.burst == 10
   assert l.tokens == 10
-  assert l.micro_seconds_per_token == 30_000_000
+  assert l.ns_per_token == 30_000_000_000
 
   // 61 hits per hour.
   // 1 hour is 3.6 billion micro seconds
   // 59016393.4426 microseconds per hit, we should round up to 59_016_394 to keep our limit guarantee.
   let l = limit.per_hour(hits: 61)
-  assert l.max_tokens == 61
+  assert l.burst == 61
   assert l.tokens == 61
-  assert l.micro_seconds_per_token == 59_016_394
+  assert l.ns_per_token == 59_016_393_443
 
   // 61 hits per 2 hours.
   // 2 hours is 7.2 billion micro seconds
   // 118032786.885 microseconds per hit, we should round up to 118_032_787 to keep our limit guarantee.
   let l = limit.per_hours(hits: 61, hours: 2)
-  assert l.max_tokens == 61
+  assert l.burst == 61
   assert l.tokens == 61
-  assert l.micro_seconds_per_token == 118_032_787
+  assert l.ns_per_token == 118_032_786_886
 
   // A negative should produce a no-op
 
   let l = limit.per_minute(hits: -8)
-  assert l.max_tokens == 0
+  assert l.burst == 0
   assert l.tokens == 0
-  assert l.micro_seconds_per_token == 0
+  assert l.ns_per_token == 0
   assert l.description |> string.contains("invalid")
 
   let l = limit.per_minutes(hits: 8, minutes: -8)
-  assert l.max_tokens == 0
+  assert l.burst == 0
   assert l.tokens == 0
-  assert l.micro_seconds_per_token == 0
+  assert l.ns_per_token == 0
   assert l.description |> string.contains("invalid")
 }
 
@@ -120,7 +120,7 @@ pub fn ask_rate_limiter_test() {
   list.range(1, 65) |> list.each(fn(_) { limited_counter(limiter) })
   let wait = rate_limiter.ask(limiter, 1000, 1)
   assert wait > 0
-  assert wait <= 1_000_000
+  assert wait <= 1_000_000_000
   // microseconds in one second
 
   // Wait a second so our smaller rate limit replenishes
@@ -134,7 +134,7 @@ pub fn ask_rate_limiter_test() {
   list.range(1, 40) |> list.each(fn(_) { limited_counter(limiter) })
   let wait = rate_limiter.ask(limiter, 1000, 2)
   assert wait > 0
-  assert wait > 36_000_000
+  assert wait > 36_000_000_000
   // microseconds in 36 seconds
-  assert wait < 72_000_000
+  assert wait < 72_000_000_000
 }

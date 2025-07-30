@@ -9,30 +9,24 @@ import gleam/otp/supervision
 import rate_limiter/limit
 
 // FFI to get BEAMs monotonic time.
-// We use microseconds because it's a small enough unit for common rate limiting tasks
-// (like limiting https requests).
-@external(erlang, "ffi", "get_micro_second")
-fn get_micro_second() -> Int
+@external(erlang, "ffi", "nanosecond")
+fn nanosecond() -> Int
 
 // Based on the provided last time a request was made, credits a certain number of tokens
 // to the Limit.
 fn replenish_tokens(
-  limit: limit.Limit,
-  last_hit_micro_seconds: Int,
+  limit limit: limit.Limit,
+  last_hit_ns last_hit_ns: Int,
+  curr_time_ns curr_time_ns: Int,
 ) -> limit.Limit {
-  // Monotonic difference since last hit
-  let diff_micro_seconds = get_micro_second() - last_hit_micro_seconds
-
-  // Number of tokens to add according to the limit's ratio. Using microseconds here lets us use
-  // simple integer division and get a good enough result without worrying about floating point math
-  // or big decimals or something.
-  let tokens_to_add = diff_micro_seconds / limit.micro_seconds_per_token
+  // Number of tokens to add according to the limit's ratio. 
+  let tokens_to_add = { curr_time_ns - last_hit_ns } / limit.ns_per_token
 
   // Make sure not to go over the burst limit. This keeps the available tokens
   // from growing forever.
   limit.Limit(
     ..limit,
-    tokens: int.min(limit.tokens + tokens_to_add, limit.max_tokens),
+    tokens: int.min(limit.tokens + tokens_to_add, limit.burst),
   )
 }
 
@@ -55,13 +49,13 @@ pub opaque type State {
   State(
     // The set of limits to enforce
     limits: List(limit.Limit),
-    // The monotonic time for when the last hit occured in microseconds
-    last_hit_micro_seconds: Int,
+    // The monotonic time for when the last hit occured.
+    last_hit_ns: Int,
   )
 }
 
 fn new_state() -> State {
-  State(limits: [], last_hit_micro_seconds: get_micro_second())
+  State(limits: [], last_hit_ns: nanosecond())
 }
 
 fn add_limits(state: State, limits: List(limit.Limit)) -> State {
@@ -69,11 +63,14 @@ fn add_limits(state: State, limits: List(limit.Limit)) -> State {
 }
 
 fn refill_tokens(state: State) -> State {
+  let curr_time_ns = nanosecond()
+
   State(
     ..state,
     limits: list.map(state.limits, replenish_tokens(
       _,
-      state.last_hit_micro_seconds,
+      curr_time_ns:,
+      last_hit_ns: state.last_hit_ns,
     )),
   )
 }
@@ -136,21 +133,20 @@ fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
 
             // Each remaining request constitutes a full request, *except* the one for which we're already
             // partially through the waiting period.
-            let partial_waiting_period =
-              get_micro_second() - state.last_hit_micro_seconds
+            let partial_waiting_period_ns = nanosecond() - state.last_hit_ns
 
             case not_free_requests {
               // We have enough tokens to cover all the requests we want to make.
               0 -> 0
 
               // We're just missing one token, so we just return the partial limit
-              1 -> partial_waiting_period
+              1 -> partial_waiting_period_ns
 
               // We're missing more than one token, so we need to wait the partial waiting period
               // *plus* the full waiting period for the rest of the tokens
               _ ->
-                partial_waiting_period
-                + { limit.micro_seconds_per_token * { not_free_requests - 1 } }
+                partial_waiting_period_ns
+                + { limit.ns_per_token * { not_free_requests - 1 } }
             }
           }
 
@@ -204,7 +200,7 @@ pub fn lazy_guard(
 }
 
 /// Ask the rate limiter how much time is left before you can make n requests.
-/// The response is in *microseconds*.
+/// The response is in *nanoseconds*.
 pub fn ask(
   rate_limiter: actor.Started(process.Subject(Msg)),
   timeout_ms: Int,

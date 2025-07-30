@@ -1,6 +1,6 @@
 -module(ffi).
 
--export([get_micro_second/0]).
+-export([nanosecond/0]).
 
-get_micro_second() ->
-    erlang:monotonic_time(microsecond).
+nanosecond() ->
+    erlang:monotonic_time(nanosecond).
