@@ -1,9 +1,7 @@
 import gleam/erlang/process
 import gleam/list
-import gleam/string
 import gleeunit
 import rate_limiter
-import rate_limiter/limit
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -19,7 +17,10 @@ fn limited_counter(limiter: rate_limiter.RateLimiter) -> Int {
 pub fn basic_usage_test() {
   // Set up the rate limiter
   let assert Ok(limiter) =
-    rate_limiter.new([limit.per_second(hits: 10), limit.per_minute(hits: 15)])
+    rate_limiter.start([
+      rate_limiter.hits_per_second(hits: 10),
+      rate_limiter.hits_per_minute(hits: 15),
+    ])
 
   // Call limited counter 30 times in a row, and verify
   // the sum of successful counts is 10
@@ -38,7 +39,8 @@ pub fn basic_usage_test() {
 }
 
 pub fn a_rate_limit_with_an_invalid_configuration_immediately_fails_test() {
-  let assert Ok(limiter) = rate_limiter.new([limit.per_second(hits: -10)])
+  let assert Ok(limiter) =
+    rate_limiter.start([rate_limiter.hits_per_second(hits: -10)])
 
   assert limited_counter(limiter) == 0
 }
@@ -47,7 +49,7 @@ pub fn each_limit_constructor_test() {
   // 10 hits per second.
   // 1 second is 1_000_000 micro seconds
   // That makes 100_000 micros seconds per token w/ a max of 10 tokens.
-  let l = limit.per_second(10)
+  let l = rate_limiter.hits_per_second(10)
   assert l.burst == 10
   assert l.tokens == 10
   assert l.ns_per_token == 100_000_000
@@ -55,7 +57,7 @@ pub fn each_limit_constructor_test() {
   // 10 hits per every 2 seconds.
   // 2 seconds is 2_000_000 micro seconds
   // That makes 200_000 micros seconds per token w/ a max of 10 tokens.
-  let l = limit.per_seconds(hits: 10, seconds: 2)
+  let l = rate_limiter.hits_per_seconds(hits: 10, seconds: 2)
   assert l.burst == 10
   assert l.tokens == 10
   assert l.ns_per_token == 200_000_000
@@ -63,7 +65,7 @@ pub fn each_limit_constructor_test() {
   // 10 hits per minute.
   // 1 minute is 60_000_000 micro seconds
   // That makes 6_000_000 micros seconds per token w/ a max of 10 tokens.
-  let l = limit.per_minute(10)
+  let l = rate_limiter.hits_per_minute(10)
   assert l.burst == 10
   assert l.tokens == 10
   assert l.ns_per_token == 6_000_000_000
@@ -71,7 +73,7 @@ pub fn each_limit_constructor_test() {
   // 10 hits per 5 minutes.
   // 5 minutes is 300_000_000 micro seconds
   // That makes 30_000_000 micro seconds per token w/ a max of 10 tokens.
-  let l = limit.per_minutes(hits: 10, minutes: 5)
+  let l = rate_limiter.hits_per_minutes(hits: 10, minutes: 5)
   assert l.burst == 10
   assert l.tokens == 10
   assert l.ns_per_token == 30_000_000_000
@@ -79,7 +81,7 @@ pub fn each_limit_constructor_test() {
   // 61 hits per hour.
   // 1 hour is 3.6 billion micro seconds
   // 59016393.4426 microseconds per hit, we should round up to 59_016_394 to keep our limit guarantee.
-  let l = limit.per_hour(hits: 61)
+  let l = rate_limiter.hits_per_hour(hits: 61)
   assert l.burst == 61
   assert l.tokens == 61
   assert l.ns_per_token == 59_016_393_443
@@ -87,29 +89,18 @@ pub fn each_limit_constructor_test() {
   // 61 hits per 2 hours.
   // 2 hours is 7.2 billion micro seconds
   // 118032786.885 microseconds per hit, we should round up to 118_032_787 to keep our limit guarantee.
-  let l = limit.per_hours(hits: 61, hours: 2)
+  let l = rate_limiter.hits_per_hours(hits: 61, hours: 2)
   assert l.burst == 61
   assert l.tokens == 61
   assert l.ns_per_token == 118_032_786_886
-
-  // A negative should produce a no-op
-
-  let l = limit.per_minute(hits: -8)
-  assert l.burst == 0
-  assert l.tokens == 0
-  assert l.ns_per_token == 0
-  assert l.description |> string.contains("invalid")
-
-  let l = limit.per_minutes(hits: 8, minutes: -8)
-  assert l.burst == 0
-  assert l.tokens == 0
-  assert l.ns_per_token == 0
-  assert l.description |> string.contains("invalid")
 }
 
 pub fn ask_rate_limiter_test() {
   let assert Ok(limiter) =
-    rate_limiter.new([limit.per_minute(60), limit.per_hour(100)])
+    rate_limiter.start([
+      rate_limiter.hits_per_minute(60),
+      rate_limiter.hits_per_hour(100),
+    ])
 
   // No requests yet, should be able to make a request right away
   assert rate_limiter.ask(limiter, 1000, 1) == 0
