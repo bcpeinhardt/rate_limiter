@@ -19,11 +19,6 @@
             pkgs.erlang
             pkgs.rebar3
           ];
-          shellHook = ''
-            export IN_NIX_SHELL_TAG="(nix)"
-            export PROMPT_COMMAND='PS1="$IN_NIX_SHELL_TAG \u@\h:\w\$ "'
-          '';
-
         };
       });
 }
