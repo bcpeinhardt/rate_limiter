@@ -1,16 +1,19 @@
 //// The inner actor implementation of the RateLimiter. Use this module if you want to use
 //// the rate limiter as part of a larger supervision tree.
 
+import gleam/bool
 import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/otp/actor
 import gleam/otp/supervision
+import gleam/result
 
 // FFI to get BEAMs monotonic time.
 @external(erlang, "ffi", "nanosecond")
 fn nanosecond() -> Int
 
+// There are 1 billion nanoseconds in one second.
 const one_second_ns = 1_000_000_000
 
 /// Represents the actual limit on the requests that can be made. We use a token bucket algorithm,
@@ -34,6 +37,28 @@ fn is_valid(limit limit: Limit) -> Bool {
   && limit.burst >= limit.tokens
   && limit.ns_per_token > 0
   && limit.description != ""
+}
+
+// This is our algorithm for replenishing tokens each time the actor loop runs.
+fn replenish_tokens(
+  limit limit: Limit,
+  last_hit_ns last_hit_ns: Int,
+  curr_time_ns curr_time_ns: Int,
+) -> Limit {
+  let tokens =
+    // Start with the current monotonic time
+    curr_time_ns
+    // Subtract the monotonic time of the last hit to get the elapsed time
+    |> int.subtract(last_hit_ns)
+    // Divide by the replenish rate to get the number of tokens earned
+    |> int.divide(limit.ns_per_token)
+    |> result.unwrap(or: 0)
+    // Add the earned tokens to the existing token bucket
+    |> int.add(limit.tokens)
+    // Cap the size at the burst limit so we don't refill past our max
+    |> int.min(limit.burst)
+
+  Limit(..limit, tokens:)
 }
 
 // Creates a `Limit` based on a number of hits per number of nanoseconds.
@@ -128,21 +153,6 @@ pub fn hits_per_hours(hits hits: Int, hours hrs: Int) -> Limit {
   )
 }
 
-// Based on the provided last time a request was made, credits a certain number of tokens
-// to the Limit.
-fn replenish_tokens(
-  limit limit: Limit,
-  last_hit_ns last_hit_ns: Int,
-  curr_time_ns curr_time_ns: Int,
-) -> Limit {
-  // Number of tokens to add according to the limit's ratio. 
-  let tokens_to_add = { curr_time_ns - last_hit_ns } / limit.ns_per_token
-
-  // Make sure not to go over the burst limit. This keeps the available tokens
-  // from growing forever.
-  Limit(..limit, tokens: int.min(limit.tokens + tokens_to_add, limit.burst))
-}
-
 pub opaque type Msg {
 
   // Try to perform a request *immediately*.
@@ -167,35 +177,15 @@ pub opaque type State {
   )
 }
 
-fn refill_tokens(state: State, curr_time_ns: Int) -> State {
-  State(
-    ..state,
-    limits: list.map(state.limits, replenish_tokens(
-      _,
-      curr_time_ns:,
-      last_hit_ns: state.last_hit_ns,
-    )),
-  )
-}
-
-// Try to consume a token for a given limit.
-fn try_consume_token(limit: Limit) -> Result(Limit, Nil) {
-  case limit.tokens > 0 {
-    // No tokens available to consume
-    False -> Error(Nil)
-
-    // There was a token available
-    True -> Ok(Limit(..limit, tokens: limit.tokens - 1))
-  }
-}
-
 fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
-  // We do 1 call to get the monotonic time per message.
+  // We do 1 call to get the monotonic time per message. Then we use it to update all the limits
   let curr_time_ns = nanosecond()
-
-  // Before handling any messages, we should use the last recorded hit
-  // time to refill the tokens for each limit
-  let state = refill_tokens(state, curr_time_ns)
+  let updated_limits =
+    list.fold(state.limits, [], fn(updated_limits, limit) {
+      replenish_tokens(limit:, curr_time_ns:, last_hit_ns: state.last_hit_ns)
+      |> list.prepend(to: updated_limits)
+    })
+  let state = State(..state, limits: updated_limits)
 
   case msg {
     Hit(reply_with:) -> {
@@ -204,14 +194,12 @@ fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
       // to reflect the fact we made a request (i.e. spent a token)
       let res =
         list.try_fold(state.limits, [], fn(updated_limits, limit) {
-          case try_consume_token(limit) {
-            // Could not consume a token, return an error with the limit
-            // that caused the failure.
-            Error(Nil) -> Error(limit)
+          case limit.tokens {
+            // No token to spend, error with the limit that was violated for context
+            0 -> Error(limit)
 
-            // Successfully consumed the token, add the updated limit to the
-            // list of limits
-            Ok(limit) -> Ok([limit, ..updated_limits])
+            // Token available. Consume the token and track the update.
+            x -> Ok([Limit(..limit, tokens: x - 1), ..updated_limits])
           }
         })
 
@@ -223,9 +211,9 @@ fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
         }
 
         // Request accepted
-        Ok(limits) -> {
+        Ok(updated_limits) -> {
           process.send(reply_with, Ok(Nil))
-          actor.continue(State(..state, limits:))
+          actor.continue(State(..state, limits: updated_limits))
         }
       }
     }
@@ -264,15 +252,30 @@ fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
   }
 }
 
+/// Convenience type alias for the rate limiter actor
 pub type RateLimiter =
   actor.Started(process.Subject(Msg))
 
 /// Start a new rate limiter actor.
-pub fn start(
-  limits: List(Limit),
-) -> Result(actor.Started(process.Subject(Msg)), actor.StartError) {
-  State(limits:, last_hit_ns: nanosecond())
-  |> actor.new
+pub fn start(limits: List(Limit)) -> Result(RateLimiter, actor.StartError) {
+  // Start the rate limiter actor. 
+  actor.new_with_initialiser(1000, fn(subj) {
+    // We validate that all the limits are properly configured in the actor's 
+    // initializer function. My reasoning for this is as follows:
+    // This rate limiter is meant to be ephemeral, meaning you don't spin up 
+    // a single rate limtier and funnel all your requests through it (the performance would
+    // be horrible anyway), rather you spin up a rate limiter dynamically for a session
+    use <- bool.guard(
+      list.any(limits, fn(limit) { !is_valid(limit) }),
+      Error("invalid limit"),
+    )
+
+    State(limits:, last_hit_ns: nanosecond())
+    |> actor.initialised
+    |> actor.selecting(process.new_selector() |> process.select(subj))
+    |> actor.returning(subj)
+    |> Ok
+  })
   |> actor.on_message(handle_msg)
   |> actor.start
 }
@@ -284,16 +287,16 @@ pub fn supervised(
   supervision.worker(fn() { start(limits) })
 }
 
-/// This function allows the rate limiter *actor* to be used as a lazy guard.
+/// This function allows the rate limiter to be used as a lazy guard.
 /// Example:
 /// ```gleam
-/// use <- rate_limiter.lazy_guard(limiter_actor, fn(limit_description) {
+/// use <- rate_limiter.lazy_guard(limiter, fn(limit_description) {
 ///   // ... Construct the appropriate error. `limit_description` is a text description of the limit that was violated.
 /// })
 /// // ... Continue with the function
 /// ```
 pub fn lazy_guard(
-  rate_limiter: actor.Started(process.Subject(Msg)),
+  rate_limiter: RateLimiter,
   timeout_ms: Int,
   or_else: fn(String) -> a,
   do: fn() -> a,
@@ -309,10 +312,6 @@ pub fn lazy_guard(
 
 /// Ask the rate limiter how much time is left before you can make n requests.
 /// The response is in *nanoseconds*.
-pub fn ask(
-  rate_limiter: actor.Started(process.Subject(Msg)),
-  timeout_ms: Int,
-  n_requests: Int,
-) -> Int {
+pub fn ask(rate_limiter: RateLimiter, timeout_ms: Int, n_requests: Int) -> Int {
   process.call(rate_limiter.data, timeout_ms, Ask(_, n_requests:))
 }

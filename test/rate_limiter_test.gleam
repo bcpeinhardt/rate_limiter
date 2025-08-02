@@ -1,5 +1,7 @@
 import gleam/erlang/process
 import gleam/list
+import gleam/otp/actor
+import gleam/string
 import gleeunit
 import rate_limiter
 
@@ -39,10 +41,10 @@ pub fn basic_usage_test() {
 }
 
 pub fn a_rate_limit_with_an_invalid_configuration_immediately_fails_test() {
-  let assert Ok(limiter) =
+  let assert Error(start_error) =
     rate_limiter.start([rate_limiter.hits_per_second(hits: -10)])
-
-  assert limited_counter(limiter) == 0
+  let assert actor.InitFailed(msg) = start_error
+  assert msg |> string.contains("invalid limit")
 }
 
 pub fn each_limit_constructor_test() {
