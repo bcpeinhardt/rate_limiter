@@ -31,17 +31,13 @@ use <- rate_limiter.lazy_guard(limiter, fn(limit_description) {
 
 A word of caution: 
 
-This is a simple actor implementing a single token bucket. 
-
-In Beam world, we tend to write a simple web server to handle one request and spin up a million rather than
-a super complicated web server to handle a million requests and spinning up only one (bad paraphrasing).
+This is a simple actor implementing a single token bucket. It's meant as a building block / primitive.
 
 *DO NOT* funnel all the requests to your web service through this single actor. Please.
 
-If you're implementing a token based rate limiter for your wisp backend, you can probably get a long way with a 
-middleware to do an ETS lookup.
-
-If you're looking for something more granular or more ephemeral (like *session* based rate limits), this might
-be the package for you.
+You could probably use this package as *part* of a rate limiting setup for an API. For example, if you were doing
+session based authentication in wisp, you might set up an ETS table mapping session cookies to their running rate limiters.
+That way you're hitting the ETS table for rate limits on a per session basis rather than a per request basis.
+(Maybe, not really my area tbh).
 
 Further documentation can be found at <https://hexdocs.pm/rate_limiter>.

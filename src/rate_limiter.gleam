@@ -1,6 +1,3 @@
-//// The inner actor implementation of the RateLimiter. Use this module if you want to use
-//// the rate limiter as part of a larger supervision tree.
-
 import gleam/bool
 import gleam/erlang/process
 import gleam/int
@@ -252,7 +249,7 @@ fn handle_msg(state: State, msg: Msg) -> actor.Next(State, Msg) {
   }
 }
 
-/// Convenience type alias for the rate limiter actor
+/// Just an alias for the actor implementation.
 pub type RateLimiter =
   actor.Started(process.Subject(Msg))
 
@@ -261,10 +258,7 @@ pub fn start(limits: List(Limit)) -> Result(RateLimiter, actor.StartError) {
   // Start the rate limiter actor. 
   actor.new_with_initialiser(1000, fn(subj) {
     // We validate that all the limits are properly configured in the actor's 
-    // initializer function. My reasoning for this is as follows:
-    // This rate limiter is meant to be ephemeral, meaning you don't spin up 
-    // a single rate limtier and funnel all your requests through it (the performance would
-    // be horrible anyway), rather you spin up a rate limiter dynamically for a session
+    // initializer function.
     use <- bool.guard(
       list.any(limits, fn(limit) { !is_valid(limit) }),
       Error("invalid limit"),
