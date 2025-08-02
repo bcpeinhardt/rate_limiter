@@ -284,7 +284,7 @@ pub fn supervised(
 /// This function allows the rate limiter to be used as a lazy guard.
 /// Example:
 /// ```gleam
-/// use <- rate_limiter.lazy_guard(limiter, fn(limit_description) {
+/// use <- speedbump.lazy_guard(limiter, fn(limit_description) {
 ///   // ... Construct the appropriate error. `limit_description` is a text description of the limit that was violated.
 /// })
 /// // ... Continue with the function

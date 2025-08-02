@@ -1,8 +1,8 @@
-name = "rate_limiter"
+name = "speedbump"
 version = "1.0.0"
 description = "A simple token bucket rate limiter as a Gleam actor"
 licences = ["Apache-2.0"]
-repository = { type = "github", user = "bcpeinhardt", repo = "rate_limiter" }
+repository = { type = "github", user = "bcpeinhardt", repo = "speedbump" }
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
